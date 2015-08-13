@@ -157,7 +157,9 @@ VALID_OPTS = {
     # Force the minion into a single environment when it fetches files from the master
     'environment': str,
 
-    # Force the minion into a single pillar root when it fetches pillar data from the master
+    # Force the minion into a single pillar root when it fetches pillar data
+    # from the master, when unspecified, falls back to the value of
+    # 'environment'.
     'pillarenv': str,
 
     # Allows a user to provide an alternate name for top.sls
@@ -2558,6 +2560,10 @@ def apply_minion_config(overrides=None,
     # if there is no schedule option yet, add an empty scheduler
     if 'schedule' not in opts:
         opts['schedule'] = {}
+
+    # fallback value of 'pillarenv' to 'environment' when specified.
+    if opts['pillarenv'] is None and opts['environment'] is not None:
+        opts['pillarenv'] = opts['environment']
     return opts
 
 
