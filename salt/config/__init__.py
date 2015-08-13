@@ -165,6 +165,8 @@ VALID_OPTS = {
     # Allows a user to provide an alternate name for top.sls
     'state_top': str,
 
+    'state_top_saltenv': str,
+
     # States to run when a minion starts up
     'startup_states': str,
 
@@ -309,6 +311,9 @@ VALID_OPTS = {
     # Specify the format for state outputs. See highstate outputter for additional details.
     'state_output': str,
 
+    # Tells the highstate outputter to only report diffs of states that changed
+    'state_output_diff': bool,
+
     # When true, states run in the order defined in an SLS file, unless requisites re-order them
     'state_auto_order': bool,
 
@@ -378,9 +383,6 @@ VALID_OPTS = {
     # Events matching a tag in this list should never be sent to an event returner.
     'event_return_blacklist': list,
 
-    # The source location for the winrepo sls files
-    'win_repo_source_dir': str,
-
     # This pidfile to write out to when a deamon starts
     'pidfile': str,
 
@@ -428,7 +430,17 @@ VALID_OPTS = {
     # A master-only copy of the file_roots dictionary, used by the state compiler
     'master_roots': dict,
 
-
+    'git_pillar_base': str,
+    'git_pillar_branch': str,
+    'git_pillar_env': str,
+    'git_pillar_root': str,
+    'git_pillar_ssl_verify': bool,
+    'git_pillar_user': str,
+    'git_pillar_password': str,
+    'git_pillar_insecure_auth': bool,
+    'git_pillar_privkey': str,
+    'git_pillar_pubkey': str,
+    'git_pillar_passphrase': str,
     'gitfs_remotes': list,
     'gitfs_mountpoint': str,
     'gitfs_root': str,
@@ -441,6 +453,7 @@ VALID_OPTS = {
     'gitfs_passphrase': str,
     'gitfs_env_whitelist': list,
     'gitfs_env_blacklist': list,
+    'gitfs_ssl_verify': bool,
     'hgfs_remotes': list,
     'hgfs_mountpoint': str,
     'hgfs_root': str,
@@ -470,9 +483,21 @@ VALID_OPTS = {
     # Whether or not a copy of the master opts dict should be rendered into minion pillars
     'pillar_opts': bool,
 
-
     'pillar_safe_render_error': bool,
+
+    # When creating a pillar, there are several stratigies to choose from when
+    # encountering duplicate values
     'pillar_source_merging_strategy': str,
+
+    # The ordering for environment merging
+    'env_order': list,
+
+    'default_top': str,
+
+    # Can be 'merge', 'same', 'preferred'
+    'top_file_merging_strategy': str,
+    'top_file_base': str,
+
     'ping_on_rotate': bool,
     'peer': dict,
     'preserve_minion_cache': bool,
@@ -519,6 +544,9 @@ VALID_OPTS = {
     # that it receives
     'master_job_cache': str,
 
+    # Specify whether the master should store end times for jobs as returns come in
+    'job_cache_store_endtime': bool,
+
     # The minion data cache is a cache of information about the minions stored on the master.
     # This information is primarily the pillar and grains data. The data is cached in the master
     # cachedir under the name of the minion and used to predetermine what minions are expected to
@@ -553,9 +581,21 @@ VALID_OPTS = {
     # The logfile location for salt-key
     'key_logfile': str,
 
-    'win_repo': str,
-    'win_repo_mastercachefile': str,
-    'win_gitrepos': list,
+    # The source location for the winrepo sls files
+    # (used by win_pkg.py, minion only)
+    'winrepo_source_dir': str,
+
+    'winrepo_dir': str,
+    'winrepo_cachefile': str,
+    'winrepo_remotes': list,
+    'winrepo_branch': str,
+    'winrepo_ssl_verify': bool,
+    'winrepo_user': str,
+    'winrepo_password': str,
+    'winrepo_insecure_auth': bool,
+    'winrepo_privkey': str,
+    'winrepo_pubkey': str,
+    'winrepo_passphrase': str,
 
     # Set a hard limit for the amount of memory modules can consume on a minion.
     'modules_max_memory': int,
@@ -688,6 +728,7 @@ VALID_OPTS = {
     # Used by salt-api for master requests timeout
     'rest_timeout': int,
 
+    # If set, all minion exec module actions will be rerouted through sudo as this user
     'sudo_user': str,
 }
 
@@ -723,6 +764,7 @@ DEFAULT_MINION_OPTS = {
     'pillarenv': None,
     'extension_modules': '',
     'state_top': 'top.sls',
+    'state_top_saltenv': None,
     'startup_states': '',
     'sls_list': [],
     'top_file': '',
@@ -731,6 +773,9 @@ DEFAULT_MINION_OPTS = {
     'file_roots': {
         'base': [salt.syspaths.BASE_FILE_ROOTS_DIR],
     },
+    'default_top': 'base',
+    'env_order': [],
+    'top_file_merging_strategy': 'merge',
     'fileserver_limit_traversal': False,
     'file_recv': False,
     'file_recv_max_size': 100,
@@ -742,6 +787,17 @@ DEFAULT_MINION_OPTS = {
     'pillar_roots': {
         'base': [salt.syspaths.BASE_PILLAR_ROOTS_DIR],
     },
+    'git_pillar_base': 'master',
+    'git_pillar_branch': 'master',
+    'git_pillar_env': '',
+    'git_pillar_root': '',
+    'git_pillar_ssl_verify': False,
+    'git_pillar_user': '',
+    'git_pillar_password': '',
+    'git_pillar_insecure_auth': False,
+    'git_pillar_privkey': '',
+    'git_pillar_pubkey': '',
+    'git_pillar_passphrase': '',
     'gitfs_remotes': [],
     'gitfs_mountpoint': '',
     'gitfs_root': '',
@@ -754,6 +810,7 @@ DEFAULT_MINION_OPTS = {
     'gitfs_passphrase': '',
     'gitfs_env_whitelist': [],
     'gitfs_env_blacklist': [],
+    'gitfs_ssl_verify': False,
     'hash_type': 'md5',
     'disable_modules': [],
     'disable_returners': [],
@@ -791,6 +848,7 @@ DEFAULT_MINION_OPTS = {
     'cython_enable': False,
     'state_verbose': True,
     'state_output': 'full',
+    'state_output_diff': False,
     'state_auto_order': True,
     'state_events': False,
     'state_aggregate': False,
@@ -811,7 +869,10 @@ DEFAULT_MINION_OPTS = {
     'syndic_log_file': os.path.join(salt.syspaths.LOGS_DIR, 'syndic'),
     'syndic_pidfile': os.path.join(salt.syspaths.PIDFILE_DIR, 'salt-syndic.pid'),
     'random_reauth_delay': 10,
-    'win_repo_source_dir': 'salt://win/repo/',
+    'winrepo_source_dir': 'salt://win/repo/',
+    'winrepo_dir': 'c:\\salt\\file_roots\\winrepo',
+    'winrepo_cachefile': 'winrepo.p',
+    'winrepo_remotes': ['https://github.com/saltstack/salt-winrepo.git'],
     'pidfile': os.path.join(salt.syspaths.PIDFILE_DIR, 'salt-minion.pid'),
     'range_server': 'range:80',
     'tcp_keepalive': True,
@@ -877,7 +938,21 @@ DEFAULT_MASTER_OPTS = {
     'pillar_roots': {
         'base': [salt.syspaths.BASE_PILLAR_ROOTS_DIR],
     },
+    'default_top': 'base',
+    'env_order': [],
+    'top_file_merging_strategy': 'merge',
     'file_client': 'local',
+    'git_pillar_base': 'master',
+    'git_pillar_branch': 'master',
+    'git_pillar_env': '',
+    'git_pillar_root': '',
+    'git_pillar_ssl_verify': False,
+    'git_pillar_user': '',
+    'git_pillar_password': '',
+    'git_pillar_insecure_auth': False,
+    'git_pillar_privkey': '',
+    'git_pillar_pubkey': '',
+    'git_pillar_passphrase': '',
     'gitfs_remotes': [],
     'gitfs_mountpoint': '',
     'gitfs_root': '',
@@ -890,6 +965,7 @@ DEFAULT_MASTER_OPTS = {
     'gitfs_passphrase': '',
     'gitfs_env_whitelist': [],
     'gitfs_env_blacklist': [],
+    'gitfs_ssl_verify': False,
     'hgfs_remotes': [],
     'hgfs_mountpoint': '',
     'hgfs_root': '',
@@ -946,11 +1022,13 @@ DEFAULT_MASTER_OPTS = {
     'renderer': 'yaml_jinja',
     'failhard': False,
     'state_top': 'top.sls',
+    'state_top_saltenv': None,
     'master_tops': {},
     'order_masters': False,
     'job_cache': True,
     'ext_job_cache': '',
     'master_job_cache': 'local_cache',
+    'job_cache_store_endtime': False,
     'minion_data_cache': True,
     'enforce_mine_cache': False,
     'ipc_mode': _DFLT_IPC_MODE,
@@ -981,6 +1059,7 @@ DEFAULT_MASTER_OPTS = {
     'serial': 'msgpack',
     'state_verbose': True,
     'state_output': 'full',
+    'state_output_diff': False,
     'state_auto_order': True,
     'state_events': False,
     'state_aggregate': False,
@@ -995,10 +1074,17 @@ DEFAULT_MASTER_OPTS = {
     'verify_env': True,
     'permissive_pki_access': False,
     'default_include': 'master.d/*.conf',
-    'win_repo': os.path.join(salt.syspaths.BASE_FILE_ROOTS_DIR, 'win', 'repo'),
-    'win_repo_mastercachefile': os.path.join(salt.syspaths.BASE_FILE_ROOTS_DIR,
-                                             'win', 'repo', 'winrepo.p'),
-    'win_gitrepos': ['https://github.com/saltstack/salt-winrepo.git'],
+    'winrepo_dir': os.path.join(salt.syspaths.BASE_FILE_ROOTS_DIR, 'win', 'repo'),
+    'winrepo_cachefile': 'winrepo.p',
+    'winrepo_remotes': ['https://github.com/saltstack/salt-winrepo.git'],
+    'winrepo_branch': 'master',
+    'winrepo_ssl_verify': False,
+    'winrepo_user': '',
+    'winrepo_password': '',
+    'winrepo_insecure_auth': False,
+    'winrepo_privkey': '',
+    'winrepo_pubkey': '',
+    'winrepo_passphrase': '',
     'syndic_wait': 5,
     'jinja_lstrip_blocks': False,
     'jinja_trim_blocks': False,
@@ -1130,9 +1216,12 @@ def _expand_glob_path(file_roots):
     '''
     unglobbed_path = []
     for path in file_roots:
-        if glob.has_magic(path):
-            unglobbed_path.extend(glob.glob(path))
-        else:
+        try:
+            if glob.has_magic(path):
+                unglobbed_path.extend(glob.glob(path))
+            else:
+                unglobbed_path.append(path)
+        except Exception:
             unglobbed_path.append(path)
     return unglobbed_path
 
@@ -2398,11 +2487,20 @@ def is_profile_configured(opts, provider, profile_name):
     .. versionadded:: 2015.8.0
     '''
     # Standard dict keys required by all drivers.
-    required_keys = ['image', 'provider']
+    required_keys = ['provider']
     alias, driver = provider.split(':')
 
+    # Most drivers need an image to be specified, but some do not.
+    non_image_drivers = ['vmware']
+
     # Most drivers need a size, but some do not.
-    non_size_drivers = ['opennebula', 'parallels', 'softlayer', 'softlayer_hw']
+    non_size_drivers = ['opennebula', 'parallels', 'scaleway', 'softlayer',
+                        'softlayer_hw', 'vmware', 'vsphere']
+
+    if driver not in non_image_drivers:
+        required_keys.append('image')
+    elif driver == 'vmware':
+        required_keys.append('clonefrom')
 
     if driver not in non_size_drivers:
         required_keys.append('size')

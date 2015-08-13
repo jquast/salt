@@ -154,6 +154,7 @@ EC2_LOCATIONS = {
     'ap-southeast-1': 'ec2_ap_southeast',
     'ap-southeast-2': 'ec2_ap_southeast_2',
     'eu-west-1': 'ec2_eu_west',
+    'eu-central-1': 'ec2_eu_central',
     'sa-east-1': 'ec2_sa_east',
     'us-east-1': 'ec2_us_east',
     'us-west-1': 'ec2_us_west',
@@ -2162,11 +2163,14 @@ def create(vm_=None, call=None):
             'You cannot create an instance with -a or -f.'
         )
 
-    # Check for required profile parameters before sending any API calls.
-    if config.is_profile_configured(__opts__,
-                                    __active_provider_name__ or 'ec2',
-                                    vm_['profile']) is False:
-        return False
+    try:
+        # Check for required profile parameters before sending any API calls.
+        if config.is_profile_configured(__opts__,
+                                        __active_provider_name__ or 'ec2',
+                                        vm_['profile']) is False:
+            return False
+    except AttributeError:
+        pass
 
     # Since using "provider: <provider-engine>" is deprecated, alias provider
     # to use driver: "driver: <provider-engine>"

@@ -93,9 +93,9 @@ def latest_version(*names, **kwargs):
             latest_installed = sorted(installed_pkgs[name], cmp=_reverse_cmp_pkg_versions).pop()
             log.debug('Latest installed version of package {0} is {1}'.format(name, latest_installed))
 
-        # get latest available (from win_repo) version of package
+        # get latest available (from winrepo_dir) version of package
         pkg_info = _get_package_info(name)
-        log.trace('Raw win_repo pkg_info for {0} is {1}'.format(name, pkg_info))
+        log.trace('Raw winrepo pkg_info for {0} is {1}'.format(name, pkg_info))
         latest_available = _get_latest_pkg_version(pkg_info)
         if latest_available:
             log.debug('Latest available version of package {0} is {1}'.format(name, latest_available))
@@ -371,25 +371,47 @@ def refresh_db(saltenv='base'):
         salt '*' pkg.refresh_db
     '''
     __context__.pop('winrepo.data', None)
-    repo = __opts__['win_repo_source_dir']
-    cached_files = __salt__['cp.cache_dir'](repo, saltenv, include_pat='*.sls')
+    if 'win_repo_source_dir' in __opts__:
+        salt.utils.warn_until(
+            'Nitrogen',
+            'The \'win_repo_source_dir\' config option is deprecated, please '
+            'use \'winrepo_source_dir\' instead.'
+        )
+        winrepo_source_dir = __opts__['win_repo_source_dir']
+    else:
+        winrepo_source_dir = __opts__['winrepo_source_dir']
+
+    cached_files = __salt__['cp.cache_dir'](
+        winrepo_source_dir,
+        saltenv,
+        include_pat='*.sls'
+    )
     genrepo(saltenv=saltenv)
     return cached_files
 
 
 def _get_local_repo_dir(saltenv='base'):
-    master_repo_src = __opts__['win_repo_source_dir']
+    if 'win_repo_source_dir' in __opts__:
+        salt.utils.warn_until(
+            'Nitrogen',
+            'The \'win_repo_source_dir\' config option is deprecated, please '
+            'use \'winrepo_source_dir\' instead.'
+        )
+        winrepo_source_dir = __opts__['win_repo_source_dir']
+    else:
+        winrepo_source_dir = __opts__['winrepo_source_dir']
+
     dirs = []
     dirs.append(salt.syspaths.CACHE_DIR)
     dirs.extend(['minion', 'files'])
     dirs.append(saltenv)
-    dirs.extend(master_repo_src[7:].strip('/').split('/'))
+    dirs.extend(winrepo_source_dir[7:].strip('/').split('/'))
     return os.sep.join(dirs)
 
 
 def genrepo(saltenv='base'):
     '''
-    Generate win_repo_cachefile based on sls files in the win_repo
+    Generate winrepo_cachefile based on sls files in the winrepo
 
     CLI Example:
 
@@ -437,12 +459,28 @@ def genrepo(saltenv='base'):
 
 def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
     '''
-    Install the passed package
+    Install the passed package from the winrepo
 
-    Return a dict containing the new package names and versions::
+    :param name: The name of the package to install
+    :type name: str or None
 
-        {'<package>': {'old': '<old-version>',
-                       'new': '<new-version>'}}
+    :param bool refresh: Boolean value representing whether or not to refresh
+        the winrepo db
+
+    :param pkgs: A list of packages to install from a software repository.
+        All packages listed under ``pkgs`` will be installed via a single
+        command.
+    :type pkgs: list or None
+
+    :param str saltenv: The salt environment to use. Default is ``base``.
+
+    :param dict kwargs: Any additional argument that may be passed from the
+        state module. If they don't apply, they are ignored.
+
+    :return: Return a dict containing the new package names and versions::
+
+            {'<package>': {'old': '<old-version>',
+                           'new': '<new-version>'}}
 
     CLI Example:
 
@@ -507,6 +545,9 @@ def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
             if not cached_pkg:
                 # It's not cached. Cache it, mate.
                 cached_pkg = __salt__['cp.cache_file'](installer, saltenv)
+            if not cached_pkg:
+                return 'Unable to cache file {0} from saltenv: {1}'\
+                    .format(installer, saltenv)
             if __salt__['cp.hash_file'](installer, saltenv) != \
                                           __salt__['cp.hash_file'](cached_pkg):
                 cached_pkg = __salt__['cp.cache_file'](installer, saltenv)
@@ -516,6 +557,9 @@ def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
         cached_pkg = cached_pkg.replace('/', '\\')
         cache_path, _ = os.path.split(cached_pkg)
         msiexec = pkginfo[version_num].get('msiexec')
+        allusers = pkginfo[version_num].get('allusers')
+        if allusers is None:
+            allusers = True
         install_flags = '{0} {1}'.format(pkginfo[version_num]['install_flags'], options and options.get('extra_install_flags') or "")
 
         cmd = []
@@ -523,6 +567,8 @@ def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
             cmd.extend(['msiexec', '/i'])
         cmd.append(cached_pkg)
         cmd.extend(install_flags.split())
+        if msiexec and allusers:
+            cmd.append('ALLUSERS="1"')
 
         __salt__['cmd.run'](cmd, cache_path, output_loglevel='trace', python_shell=False)
 
@@ -602,7 +648,10 @@ def remove(name=None, pkgs=None, version=None, extra_uninstall_flags=None, **kwa
             uninstaller = pkginfo[version].get('installer')
         if not uninstaller:
             return 'Error: No installer or uninstaller configured for package {0}'.format(name)
-        if uninstaller.startswith('salt:'):
+        if uninstaller.startswith('salt:') \
+                or uninstaller.startswith('http:') \
+                or uninstaller.startswith('https:') \
+                or uninstaller.startswith('ftp:'):
             cached_pkg = \
                 __salt__['cp.is_cached'](uninstaller)
             if not cached_pkg:
@@ -701,7 +750,11 @@ def _get_name_map():
     '''
     Return a reverse map of full pkg names to the names recognized by winrepo.
     '''
-    return get_repo_data().get('name_map', {})
+    u_name_map = {}
+    name_map = get_repo_data().get('name_map', {})
+    for k in name_map.keys():
+        u_name_map[k.decode('utf-8')] = name_map[k]
+    return u_name_map
 
 
 def _get_package_info(name):

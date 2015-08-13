@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=function-redefined
+# pylint: disable=function-redefined,missing-docstring
 # TODO: Remove the following PyLint disable as soon as we support YAML and RST rendering
 # pylint: disable=abstract-method
 
@@ -13,7 +13,7 @@ from salttesting.helpers import ensure_in_syspath
 ensure_in_syspath('../../')
 
 # Import Salt Libs
-from salt.utils import config
+from salt.utils import schema
 
 # Import 3rd-party libs
 try:
@@ -51,11 +51,11 @@ class ConfigTestCase(TestCase):
     '''
 
     def test_configuration_subclass_inherits_items(self):
-        class BaseConfig(config.Configuration):
-            base = config.BooleanConfig(default=True, required=True)
+        class BaseConfig(schema.Schema):
+            base = schema.BooleanItem(default=True, required=True)
 
         class SubClassedConfig(BaseConfig):
-            hungry = config.BooleanConfig(title='Hungry', description='Are you hungry?', required=True)
+            hungry = schema.BooleanItem(title='Hungry', description='Are you hungry?', required=True)
 
         self.assertDictEqual(
             SubClassedConfig.serialize(),
@@ -67,8 +67,8 @@ class ConfigTestCase(TestCase):
                       'default': True,
                       'type': 'boolean',
                       'title': 'base'
-                     },
-                     'hungry': {
+                    },
+                    'hungry': {
                         'type': 'boolean',
                         'description': 'Are you hungry?',
                         'title': 'Hungry'
@@ -80,145 +80,402 @@ class ConfigTestCase(TestCase):
             }
         )
 
+        class MergedConfigClass(schema.Schema):
+            thirsty = schema.BooleanItem(title='Thirsty', description='Are you thirsty?', required=True)
+            merge_subclassed = SubClassedConfig(flatten=True)
+
+        expected = {
+            '$schema': 'http://json-schema.org/draft-04/schema#',
+            'type': 'object',
+            'properties': {
+                'thirsty': {
+                    'type': 'boolean',
+                    'description': 'Are you thirsty?',
+                    'title': 'Thirsty'
+                },
+                'base': {
+                  'default': True,
+                  'type': 'boolean',
+                  'title': 'base'
+                },
+                'hungry': {
+                    'type': 'boolean',
+                    'description': 'Are you hungry?',
+                    'title': 'Hungry'
+                }
+            },
+            'required': ['thirsty', 'base', 'hungry'],
+            'x-ordering': ['thirsty', 'base', 'hungry'],
+            'additionalProperties': False,
+        }
+        self.assertDictContainsSubset(
+            MergedConfigClass.serialize()['properties'],
+            expected['properties']
+        )
+        self.assertDictContainsSubset(
+            expected,
+            MergedConfigClass.serialize()
+        )
+
     def test_configuration_items_order(self):
 
-        class One(config.Configuration):
-            one = config.BooleanConfig()
+        class One(schema.Schema):
+            one = schema.BooleanItem()
 
-        class Three(config.Configuration):
-            three = config.BooleanConfig()
+        class Three(schema.Schema):
+            three = schema.BooleanItem()
 
         class Final(One):
-            two = config.BooleanConfig()
+            two = schema.BooleanItem()
             three = Three(flatten=True)
 
         self.assertEqual(Final.serialize()['x-ordering'], ['one', 'two', 'three'])
 
     def test_optional_requirements_config(self):
-        class BaseRequirements(config.Configuration):
-            driver = config.StringConfig(default='digital_ocean', format='hidden')
+        class BaseRequirements(schema.Schema):
+            driver = schema.StringItem(default='digital_ocean', format='hidden')
 
-        class SSHKeyFileConfiguration(config.Configuration):
-            ssh_key_file = config.StringConfig(
+        class SSHKeyFileSchema(schema.Schema):
+            ssh_key_file = schema.StringItem(
                 title='SSH Private Key',
                 description='The path to an SSH private key which will be used '
                             'to authenticate on the deployed VMs',
-                required=True)
+                )
 
-        class SSHKeyNamesConfiguration(config.Configuration):
-            ssh_key_names = config.StringConfig(
+        class SSHKeyNamesSchema(schema.Schema):
+            ssh_key_names = schema.StringItem(
                 title='SSH Key Names',
                 description='The names of an SSH key being managed on '
                             'Digital Ocean account which will be used to '
                             'authenticate on the deployed VMs',
-                required=True)
+                )
 
         class Requirements(BaseRequirements):
             title = 'Digital Ocean'
             description = 'Digital Ocean Cloud VM configuration requirements.'
 
-            personal_access_token = config.StringConfig(
+            personal_access_token = schema.StringItem(
                 title='Personal Access Token',
                 description='This is the API access token which can be generated '
                             'under the API/Application on your account',
                 required=True)
 
-            requirements_definition = config.AnyOfConfig(
+            requirements_definition = schema.AnyOfItem(
                 items=(
-                    SSHKeyFileConfiguration.as_requirements_item(),
-                    SSHKeyNamesConfiguration.as_requirements_item()
+                    SSHKeyFileSchema.as_requirements_item(),
+                    SSHKeyNamesSchema.as_requirements_item()
                 ),
             )(flatten=True)
-            ssh_key_file = SSHKeyFileConfiguration(flatten=True)
-            ssh_key_names = SSHKeyNamesConfiguration(flatten=True)
+            ssh_key_file = SSHKeyFileSchema(flatten=True)
+            ssh_key_names = SSHKeyNamesSchema(flatten=True)
 
-        expexcted = {
-                "$schema": "http://json-schema.org/draft-04/schema#",
-                "title": "Digital Ocean",
-                "description": "Digital Ocean Cloud VM configuration requirements.",
-                "type": "object",
-                "properties": {
-                    "driver": {
-                        "default": "digital_ocean",
-                        "format": "hidden",
-                        "type": "string",
-                        "title": "driver"
-                    },
-                    "personal_access_token": {
-                        "type": "string",
-                        "description": "This is the API access token which can be "
-                                       "generated under the API/Application on your account",
-                        "title": "Personal Access Token"
-                    },
-                    "ssh_key_file": {
-                        "type": "string",
-                        "description": "The path to an SSH private key which will "
-                                       "be used to authenticate on the deployed VMs",
-                        "title": "SSH Private Key"
-                    },
-                    "ssh_key_names": {
-                        "type": "string",
-                        "description": "The names of an SSH key being managed on Digital "
-                                       "Ocean account which will be used to authenticate "
-                                       "on the deployed VMs",
-                        "title": "SSH Key Names"
-                    }
+        expected = {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "title": "Digital Ocean",
+            "description": "Digital Ocean Cloud VM configuration requirements.",
+            "type": "object",
+            "properties": {
+                "driver": {
+                    "default": "digital_ocean",
+                    "format": "hidden",
+                    "type": "string",
+                    "title": "driver"
                 },
-                "anyOf": [
-                    {"required": ["ssh_key_file"]},
-                    {"required": ["ssh_key_names"]}
-                ],
-                "required": [
-                    "personal_access_token"
-                ],
-                "x-ordering": [
-                    "driver",
-                    "personal_access_token",
-                    "ssh_key_file",
-                    "ssh_key_names",
-                ],
-                "additionalProperties": False
-            }
-        self.assertDictEqual(expexcted, Requirements.serialize())
+                "personal_access_token": {
+                    "type": "string",
+                    "description": "This is the API access token which can be "
+                                   "generated under the API/Application on your account",
+                    "title": "Personal Access Token"
+                },
+                "ssh_key_file": {
+                    "type": "string",
+                    "description": "The path to an SSH private key which will "
+                                   "be used to authenticate on the deployed VMs",
+                    "title": "SSH Private Key"
+                },
+                "ssh_key_names": {
+                    "type": "string",
+                    "description": "The names of an SSH key being managed on Digital "
+                                   "Ocean account which will be used to authenticate "
+                                   "on the deployed VMs",
+                    "title": "SSH Key Names"
+                }
+            },
+            "anyOf": [
+                {"required": ["ssh_key_file"]},
+                {"required": ["ssh_key_names"]}
+            ],
+            "required": [
+                "personal_access_token"
+            ],
+            "x-ordering": [
+                "driver",
+                "personal_access_token",
+                "ssh_key_file",
+                "ssh_key_names",
+            ],
+            "additionalProperties": False
+        }
+        self.assertDictEqual(expected, Requirements.serialize())
+
+        class Requirements2(BaseRequirements):
+            title = 'Digital Ocean'
+            description = 'Digital Ocean Cloud VM configuration requirements.'
+
+            personal_access_token = schema.StringItem(
+                title='Personal Access Token',
+                description='This is the API access token which can be generated '
+                            'under the API/Application on your account',
+                required=True)
+
+            ssh_key_file = schema.StringItem(
+                title='SSH Private Key',
+                description='The path to an SSH private key which will be used '
+                            'to authenticate on the deployed VMs')
+
+            ssh_key_names = schema.StringItem(
+                title='SSH Key Names',
+                description='The names of an SSH key being managed on '
+                            'Digital Ocean account which will be used to '
+                            'authenticate on the deployed VMs')
+
+            requirements_definition = schema.AnyOfItem(
+                items=(
+                    schema.RequirementsItem(requirements=['ssh_key_file']),
+                    schema.RequirementsItem(requirements=['ssh_key_names'])
+                ),
+            )(flatten=True)
+
+        expected = {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "title": "Digital Ocean",
+            "description": "Digital Ocean Cloud VM configuration requirements.",
+            "type": "object",
+            "properties": {
+                "driver": {
+                    "default": "digital_ocean",
+                    "format": "hidden",
+                    "type": "string",
+                    "title": "driver"
+                },
+                "personal_access_token": {
+                    "type": "string",
+                    "description": "This is the API access token which can be "
+                                   "generated under the API/Application on your account",
+                    "title": "Personal Access Token"
+                },
+                "ssh_key_file": {
+                    "type": "string",
+                    "description": "The path to an SSH private key which will "
+                                   "be used to authenticate on the deployed VMs",
+                    "title": "SSH Private Key"
+                },
+                "ssh_key_names": {
+                    "type": "string",
+                    "description": "The names of an SSH key being managed on Digital "
+                                   "Ocean account which will be used to authenticate "
+                                   "on the deployed VMs",
+                    "title": "SSH Key Names"
+                }
+            },
+            "anyOf": [
+                {"required": ["ssh_key_file"]},
+                {"required": ["ssh_key_names"]}
+            ],
+            "required": [
+                "personal_access_token"
+            ],
+            "x-ordering": [
+                "driver",
+                "personal_access_token",
+                "ssh_key_file",
+                "ssh_key_names",
+            ],
+            "additionalProperties": False
+        }
+        self.assertDictContainsSubset(expected, Requirements2.serialize())
+
+        class Requirements3(schema.Schema):
+            title = 'Digital Ocean'
+            description = 'Digital Ocean Cloud VM configuration requirements.'
+
+            merge_reqs = Requirements(flatten=True)
+
+        expected = {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "title": "Digital Ocean",
+            "description": "Digital Ocean Cloud VM configuration requirements.",
+            "type": "object",
+            "properties": {
+                "driver": {
+                    "default": "digital_ocean",
+                    "format": "hidden",
+                    "type": "string",
+                    "title": "driver"
+                },
+                "personal_access_token": {
+                    "type": "string",
+                    "description": "This is the API access token which can be "
+                                   "generated under the API/Application on your account",
+                    "title": "Personal Access Token"
+                },
+                "ssh_key_file": {
+                    "type": "string",
+                    "description": "The path to an SSH private key which will "
+                                   "be used to authenticate on the deployed VMs",
+                    "title": "SSH Private Key"
+                },
+                "ssh_key_names": {
+                    "type": "string",
+                    "description": "The names of an SSH key being managed on Digital "
+                                   "Ocean account which will be used to authenticate "
+                                   "on the deployed VMs",
+                    "title": "SSH Key Names"
+                }
+            },
+            "anyOf": [
+                {"required": ["ssh_key_file"]},
+                {"required": ["ssh_key_names"]}
+            ],
+            "required": [
+                "personal_access_token"
+            ],
+            "x-ordering": [
+                "driver",
+                "personal_access_token",
+                "ssh_key_file",
+                "ssh_key_names",
+            ],
+            "additionalProperties": False
+        }
+        self.assertDictContainsSubset(expected, Requirements3.serialize())
+
+        class Requirements4(schema.Schema):
+            title = 'Digital Ocean'
+            description = 'Digital Ocean Cloud VM configuration requirements.'
+
+            merge_reqs = Requirements(flatten=True)
+
+            ssh_key_file_2 = schema.StringItem(
+                title='SSH Private Key',
+                description='The path to an SSH private key which will be used '
+                            'to authenticate on the deployed VMs')
+
+            ssh_key_names_2 = schema.StringItem(
+                title='SSH Key Names',
+                description='The names of an SSH key being managed on '
+                            'Digital Ocean account which will be used to '
+                            'authenticate on the deployed VMs')
+
+            requirements_definition_2 = schema.AnyOfItem(
+                items=(
+                    schema.RequirementsItem(requirements=['ssh_key_file_2']),
+                    schema.RequirementsItem(requirements=['ssh_key_names_2'])
+                ),
+            )(flatten=True)
+
+        expected = {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "title": "Digital Ocean",
+            "description": "Digital Ocean Cloud VM configuration requirements.",
+            "type": "object",
+            "properties": {
+                "driver": {
+                    "default": "digital_ocean",
+                    "format": "hidden",
+                    "type": "string",
+                    "title": "driver"
+                },
+                "personal_access_token": {
+                    "type": "string",
+                    "description": "This is the API access token which can be "
+                                   "generated under the API/Application on your account",
+                    "title": "Personal Access Token"
+                },
+                "ssh_key_file": {
+                    "type": "string",
+                    "description": "The path to an SSH private key which will "
+                                   "be used to authenticate on the deployed VMs",
+                    "title": "SSH Private Key"
+                },
+                "ssh_key_names": {
+                    "type": "string",
+                    "description": "The names of an SSH key being managed on Digital "
+                                   "Ocean account which will be used to authenticate "
+                                   "on the deployed VMs",
+                    "title": "SSH Key Names"
+                },
+                "ssh_key_file_2": {
+                    "type": "string",
+                    "description": "The path to an SSH private key which will "
+                                   "be used to authenticate on the deployed VMs",
+                    "title": "SSH Private Key"
+                },
+                "ssh_key_names_2": {
+                    "type": "string",
+                    "description": "The names of an SSH key being managed on Digital "
+                                   "Ocean account which will be used to authenticate "
+                                   "on the deployed VMs",
+                    "title": "SSH Key Names"
+                }
+            },
+            "anyOf": [
+                {"required": ["ssh_key_file"]},
+                {"required": ["ssh_key_names"]},
+                {"required": ["ssh_key_file_2"]},
+                {"required": ["ssh_key_names_2"]}
+            ],
+            "required": [
+                "personal_access_token"
+            ],
+            "x-ordering": [
+                "driver",
+                "personal_access_token",
+                "ssh_key_file",
+                "ssh_key_names",
+                "ssh_key_file_2",
+                "ssh_key_names_2",
+            ],
+            "additionalProperties": False
+        }
+        self.assertDictContainsSubset(expected, Requirements4.serialize())
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_optional_requirements_config_validation(self):
-        class BaseRequirements(config.Configuration):
-            driver = config.StringConfig(default='digital_ocean', format='hidden')
+        class BaseRequirements(schema.Schema):
+            driver = schema.StringItem(default='digital_ocean', format='hidden')
 
-        class SSHKeyFileConfiguration(config.Configuration):
-            ssh_key_file = config.StringConfig(
+        class SSHKeyFileSchema(schema.Schema):
+            ssh_key_file = schema.StringItem(
                 title='SSH Private Key',
                 description='The path to an SSH private key which will be used '
-                            'to authenticate on the deployed VMs',
-                required=True)
+                            'to authenticate on the deployed VMs')
 
-        class SSHKeyNamesConfiguration(config.Configuration):
-            ssh_key_names = config.StringConfig(
+        class SSHKeyNamesSchema(schema.Schema):
+            ssh_key_names = schema.StringItem(
                 title='SSH Key Names',
                 description='The names of an SSH key being managed on  '
                             'Digial Ocean account which will be used to '
-                            'authenticate on the deployed VMs',
-                required=True)
+                            'authenticate on the deployed VMs')
 
         class Requirements(BaseRequirements):
             title = 'Digital Ocean'
             description = 'Digital Ocean Cloud VM configuration requirements.'
 
-            personal_access_token = config.StringConfig(
+            personal_access_token = schema.StringItem(
                 title='Personal Access Token',
                 description='This is the API access token which can be generated '
                             'under the API/Application on your account',
                 required=True)
 
-            requirements_definition = config.AnyOfConfig(
+            requirements_definition = schema.AnyOfItem(
                 items=(
-                    SSHKeyFileConfiguration.as_requirements_item(),
-                    SSHKeyNamesConfiguration.as_requirements_item()
+                    SSHKeyFileSchema.as_requirements_item(),
+                    SSHKeyNamesSchema.as_requirements_item()
                 ),
             )(flatten=True)
-            ssh_key_file = SSHKeyFileConfiguration(flatten=True)
-            ssh_key_names = SSHKeyNamesConfiguration(flatten=True)
+            ssh_key_file = SSHKeyFileSchema(flatten=True)
+            ssh_key_names = SSHKeyNamesSchema(flatten=True)
 
         try:
             jsonschema.validate(
@@ -252,7 +509,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not valid under any of the given schemas', excinfo.exception.message)
 
     def test_boolean_config(self):
-        item = config.BooleanConfig(title='Hungry', description='Are you hungry?')
+        item = schema.BooleanItem(title='Hungry', description='Are you hungry?')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'boolean',
@@ -261,9 +518,9 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.BooleanConfig(title='Hungry',
-                                    description='Are you hungry?',
-                                    default=False)
+        item = schema.BooleanItem(title='Hungry',
+                                  description='Are you hungry?',
+                                  default=False)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'boolean',
@@ -273,9 +530,9 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.BooleanConfig(title='Hungry',
-                                    description='Are you hungry?',
-                                    default=config.Null)
+        item = schema.BooleanItem(title='Hungry',
+                                  description='Are you hungry?',
+                                  default=schema.Null)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'boolean',
@@ -287,8 +544,8 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_boolean_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.BooleanConfig(title='Hungry', description='Are you hungry?')
+        class TestConf(schema.Schema):
+            item = schema.BooleanItem(title='Hungry', description='Are you hungry?')
 
         try:
             jsonschema.validate({'item': False}, TestConf.serialize())
@@ -300,7 +557,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not of type', excinfo.exception.message)
 
     def test_string_config(self):
-        item = config.StringConfig(title='Foo', description='Foo Item')
+        item = schema.StringItem(title='Foo', description='Foo Item')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -309,7 +566,7 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.StringConfig(title='Foo', description='Foo Item', min_length=1, max_length=3)
+        item = schema.StringItem(title='Foo', description='Foo Item', min_length=1, max_length=3)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -320,11 +577,11 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.StringConfig(title='Foo',
-                                   description='Foo Item',
-                                   min_length=1,
-                                   max_length=3,
-                                   default='foo')
+        item = schema.StringItem(title='Foo',
+                                 description='Foo Item',
+                                 min_length=1,
+                                 max_length=3,
+                                 default='foo')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -336,11 +593,11 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.StringConfig(title='Foo',
-                                   description='Foo Item',
-                                   min_length=1,
-                                   max_length=3,
-                                   enum=('foo', 'bar'))
+        item = schema.StringItem(title='Foo',
+                                 description='Foo Item',
+                                 min_length=1,
+                                 max_length=3,
+                                 enum=('foo', 'bar'))
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -352,12 +609,12 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.StringConfig(title='Foo',
-                                   description='Foo Item',
-                                   min_length=1,
-                                   max_length=3,
-                                   enum=('foo', 'bar'),
-                                   enumNames=('Foo', 'Bar'))
+        item = schema.StringItem(title='Foo',
+                                 description='Foo Item',
+                                 min_length=1,
+                                 max_length=3,
+                                 enum=('foo', 'bar'),
+                                 enumNames=('Foo', 'Bar'))
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -370,9 +627,9 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.StringConfig(title='Foo',
-                                   description='Foo Item',
-                                   pattern=r'^([\w_-]+)$')
+        item = schema.StringItem(title='Foo',
+                                 description='Foo Item',
+                                 pattern=r'^([\w_-]+)$')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -384,17 +641,17 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_string_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.StringConfig(title='Foo', description='Foo Item')
+        class TestConf(schema.Schema):
+            item = schema.StringItem(title='Foo', description='Foo Item')
 
         try:
             jsonschema.validate({'item': 'the item'}, TestConf.serialize())
         except jsonschema.exceptions.ValidationError as exc:
             self.fail('ValidationError raised: {0}'.format(exc))
 
-        class TestConf(config.Configuration):
-            item = config.StringConfig(title='Foo', description='Foo Item',
-                                       min_length=1, max_length=10)
+        class TestConf(schema.Schema):
+            item = schema.StringItem(title='Foo', description='Foo Item',
+                                     min_length=1, max_length=10)
 
         try:
             jsonschema.validate({'item': 'the item'}, TestConf.serialize())
@@ -409,35 +666,35 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 'the item the item'}, TestConf.serialize())
         self.assertIn('is too long', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.StringConfig(title='Foo', description='Foo Item',
-                                       min_length=10, max_length=100)
+        class TestConf(schema.Schema):
+            item = schema.StringItem(title='Foo', description='Foo Item',
+                                     min_length=10, max_length=100)
 
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': 'the item'}, TestConf.serialize())
         self.assertIn('is too short', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.StringConfig(title='Foo',
-                                       description='Foo Item',
-                                       enum=('foo', 'bar'))
+        class TestConf(schema.Schema):
+            item = schema.StringItem(title='Foo',
+                                     description='Foo Item',
+                                     enum=('foo', 'bar'))
 
         try:
             jsonschema.validate({'item': 'foo'}, TestConf.serialize())
         except jsonschema.exceptions.ValidationError as exc:
             self.fail('ValidationError raised: {0}'.format(exc))
 
-        class TestConf(config.Configuration):
-            item = config.StringConfig(title='Foo',
-                                       description='Foo Item',
-                                       enum=('foo', 'bar'))
+        class TestConf(schema.Schema):
+            item = schema.StringItem(title='Foo',
+                                     description='Foo Item',
+                                     enum=('foo', 'bar'))
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': 'bin'}, TestConf.serialize())
         self.assertIn('is not one of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.StringConfig(title='Foo', description='Foo Item',
-                                       pattern=r'^([\w_-]+)$')
+        class TestConf(schema.Schema):
+            item = schema.StringItem(title='Foo', description='Foo Item',
+                                     pattern=r'^([\w_-]+)$')
 
         try:
             jsonschema.validate({'item': 'the-item'}, TestConf.serialize(),
@@ -451,7 +708,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('does not match', excinfo.exception.message)
 
     def test_email_config(self):
-        item = config.EMailConfig(title='Foo', description='Foo Item')
+        item = schema.EMailItem(title='Foo', description='Foo Item')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -463,8 +720,8 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_email_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.EMailConfig(title='Item', description='Item description')
+        class TestConf(schema.Schema):
+            item = schema.EMailItem(title='Item', description='Item description')
 
         try:
             jsonschema.validate({'item': 'nobody@nowhere.com'}, TestConf.serialize(),
@@ -478,7 +735,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not a', excinfo.exception.message)
 
     def test_ipv4_config(self):
-        item = config.IPv4Config(title='Foo', description='Foo Item')
+        item = schema.IPv4Item(title='Foo', description='Foo Item')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -490,8 +747,8 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_ipv4_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.IPv4Config(title='Item', description='Item description')
+        class TestConf(schema.Schema):
+            item = schema.IPv4Item(title='Item', description='Item description')
 
         try:
             jsonschema.validate({'item': '127.0.0.1'}, TestConf.serialize(),
@@ -505,7 +762,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not a', excinfo.exception.message)
 
     def test_ipv6_config(self):
-        item = config.IPv6Config(title='Foo', description='Foo Item')
+        item = schema.IPv6Item(title='Foo', description='Foo Item')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -517,8 +774,8 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_ipv6_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.IPv6Config(title='Item', description='Item description')
+        class TestConf(schema.Schema):
+            item = schema.IPv6Item(title='Item', description='Item description')
 
         try:
             jsonschema.validate({'item': '::1'}, TestConf.serialize(),
@@ -532,7 +789,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not a', excinfo.exception.message)
 
     def test_hostname_config(self):
-        item = config.HostnameConfig(title='Foo', description='Foo Item')
+        item = schema.HostnameItem(title='Foo', description='Foo Item')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -544,8 +801,8 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_hostname_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.HostnameConfig(title='Item', description='Item description')
+        class TestConf(schema.Schema):
+            item = schema.HostnameItem(title='Item', description='Item description')
 
         try:
             jsonschema.validate({'item': 'localhost'}, TestConf.serialize(),
@@ -559,7 +816,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not a', excinfo.exception.message)
 
     def test_datetime_config(self):
-        item = config.DateTimeConfig(title='Foo', description='Foo Item')
+        item = schema.DateTimeItem(title='Foo', description='Foo Item')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -572,8 +829,8 @@ class ConfigTestCase(TestCase):
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     @skipIf(any([HAS_ISODATE, HAS_STRICT_RFC3339]) is False, 'The \'strict_rfc3339\' or \'isodate\' library is missing')
     def test_datetime_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.DateTimeConfig(title='Item', description='Item description')
+        class TestConf(schema.Schema):
+            item = schema.DateTimeItem(title='Item', description='Item description')
 
         try:
             jsonschema.validate({'item': '2015-07-01T18:05:27+01:00'}, TestConf.serialize(),
@@ -587,7 +844,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not a', excinfo.exception.message)
 
     def test_secret_config(self):
-        item = config.SecretConfig(title='Foo', description='Foo Item')
+        item = schema.SecretItem(title='Foo', description='Foo Item')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -598,7 +855,7 @@ class ConfigTestCase(TestCase):
         )
 
     def test_uri_config(self):
-        item = config.UriConfig(title='Foo', description='Foo Item')
+        item = schema.UriItem(title='Foo', description='Foo Item')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'string',
@@ -611,8 +868,8 @@ class ConfigTestCase(TestCase):
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     @skipIf(HAS_RFC3987 is False, 'The \'rfc3987\' library is missing')
     def test_uri_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.UriConfig(title='Item', description='Item description')
+        class TestConf(schema.Schema):
+            item = schema.UriItem(title='Item', description='Item description')
 
         try:
             jsonschema.validate({'item': 'ssh://localhost'}, TestConf.serialize(),
@@ -626,7 +883,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not a', excinfo.exception.message)
 
     def test_number_config(self):
-        item = config.NumberConfig(title='How many dogs', description='Question')
+        item = schema.NumberItem(title='How many dogs', description='Question')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'number',
@@ -635,10 +892,10 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.NumberConfig(title='How many dogs',
-                                   description='Question',
-                                   minimum=0,
-                                   maximum=10)
+        item = schema.NumberItem(title='How many dogs',
+                                 description='Question',
+                                 minimum=0,
+                                 maximum=10)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'number',
@@ -649,9 +906,9 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.NumberConfig(title='How many dogs',
-                                   description='Question',
-                                   multiple_of=2)
+        item = schema.NumberItem(title='How many dogs',
+                                 description='Question',
+                                 multiple_of=2)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'number',
@@ -661,12 +918,12 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.NumberConfig(title='How many dogs',
-                                   description='Question',
-                                   minimum=0,
-                                   exclusive_minimum=True,
-                                   maximum=10,
-                                   exclusive_maximum=True)
+        item = schema.NumberItem(title='How many dogs',
+                                 description='Question',
+                                 minimum=0,
+                                 exclusive_minimum=True,
+                                 maximum=10,
+                                 exclusive_maximum=True)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'number',
@@ -679,11 +936,11 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.NumberConfig(title='How many dogs',
-                                   description='Question',
-                                   minimum=0,
-                                   maximum=10,
-                                   default=0)
+        item = schema.NumberItem(title='How many dogs',
+                                 description='Question',
+                                 minimum=0,
+                                 maximum=10,
+                                 default=0)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'number',
@@ -695,12 +952,12 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.NumberConfig(title='How many dogs',
-                                   description='Question',
-                                   minimum=0,
-                                   maximum=10,
-                                   default=0,
-                                   enum=(0, 2, 4, 6))
+        item = schema.NumberItem(title='How many dogs',
+                                 description='Question',
+                                 minimum=0,
+                                 maximum=10,
+                                 default=0,
+                                 enum=(0, 2, 4, 6))
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'number',
@@ -715,8 +972,8 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_number_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.NumberConfig(title='How many dogs', description='Question')
+        class TestConf(schema.Schema):
+            item = schema.NumberItem(title='How many dogs', description='Question')
 
         try:
             jsonschema.validate({'item': 2}, TestConf.serialize())
@@ -727,10 +984,10 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': '3'}, TestConf.serialize())
         self.assertIn('is not of type', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.NumberConfig(title='How many dogs',
-                                       description='Question',
-                                       multiple_of=2.2)
+        class TestConf(schema.Schema):
+            item = schema.NumberItem(title='How many dogs',
+                                     description='Question',
+                                     multiple_of=2.2)
 
         try:
             jsonschema.validate({'item': 4.4}, TestConf.serialize())
@@ -741,9 +998,9 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 4}, TestConf.serialize())
         self.assertIn('is not a multiple of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.NumberConfig(title='Foo', description='Foo Item',
-                                       minimum=1, maximum=10)
+        class TestConf(schema.Schema):
+            item = schema.NumberItem(title='Foo', description='Foo Item',
+                                     minimum=1, maximum=10)
 
         try:
             jsonschema.validate({'item': 3}, TestConf.serialize())
@@ -754,21 +1011,21 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 11}, TestConf.serialize())
         self.assertIn('is greater than the maximum of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.NumberConfig(title='Foo', description='Foo Item',
-                                       minimum=10, maximum=100)
+        class TestConf(schema.Schema):
+            item = schema.NumberItem(title='Foo', description='Foo Item',
+                                     minimum=10, maximum=100)
 
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': 3}, TestConf.serialize())
         self.assertIn('is less than the minimum of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.NumberConfig(title='How many dogs',
-                                       description='Question',
-                                       minimum=0,
-                                       exclusive_minimum=True,
-                                       maximum=10,
-                                       exclusive_maximum=True)
+        class TestConf(schema.Schema):
+            item = schema.NumberItem(title='How many dogs',
+                                     description='Question',
+                                     minimum=0,
+                                     exclusive_minimum=True,
+                                     maximum=10,
+                                     exclusive_maximum=True)
 
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': 0}, TestConf.serialize())
@@ -778,26 +1035,26 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 10}, TestConf.serialize())
         self.assertIn('is greater than or equal to the maximum of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.NumberConfig(title='Foo',
-                                       description='Foo Item',
-                                       enum=(0, 2, 4, 6))
+        class TestConf(schema.Schema):
+            item = schema.NumberItem(title='Foo',
+                                     description='Foo Item',
+                                     enum=(0, 2, 4, 6))
 
         try:
             jsonschema.validate({'item': 4}, TestConf.serialize())
         except jsonschema.exceptions.ValidationError as exc:
             self.fail('ValidationError raised: {0}'.format(exc))
 
-        class TestConf(config.Configuration):
-            item = config.NumberConfig(title='Foo',
-                                       description='Foo Item',
-                                       enum=(0, 2, 4, 6))
+        class TestConf(schema.Schema):
+            item = schema.NumberItem(title='Foo',
+                                     description='Foo Item',
+                                     enum=(0, 2, 4, 6))
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': 3}, TestConf.serialize())
         self.assertIn('is not one of', excinfo.exception.message)
 
     def test_integer_config(self):
-        item = config.IntegerConfig(title='How many dogs', description='Question')
+        item = schema.IntegerItem(title='How many dogs', description='Question')
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'integer',
@@ -806,10 +1063,10 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.IntegerConfig(title='How many dogs',
-                                    description='Question',
-                                    minimum=0,
-                                    maximum=10)
+        item = schema.IntegerItem(title='How many dogs',
+                                  description='Question',
+                                  minimum=0,
+                                  maximum=10)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'integer',
@@ -820,9 +1077,9 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.IntegerConfig(title='How many dogs',
-                                    description='Question',
-                                    multiple_of=2)
+        item = schema.IntegerItem(title='How many dogs',
+                                  description='Question',
+                                  multiple_of=2)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'integer',
@@ -832,12 +1089,12 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.IntegerConfig(title='How many dogs',
-                                    description='Question',
-                                    minimum=0,
-                                    exclusive_minimum=True,
-                                    maximum=10,
-                                    exclusive_maximum=True)
+        item = schema.IntegerItem(title='How many dogs',
+                                  description='Question',
+                                  minimum=0,
+                                  exclusive_minimum=True,
+                                  maximum=10,
+                                  exclusive_maximum=True)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'integer',
@@ -850,11 +1107,11 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.IntegerConfig(title='How many dogs',
-                                    description='Question',
-                                    minimum=0,
-                                    maximum=10,
-                                    default=0)
+        item = schema.IntegerItem(title='How many dogs',
+                                  description='Question',
+                                  minimum=0,
+                                  maximum=10,
+                                  default=0)
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'integer',
@@ -866,12 +1123,12 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.IntegerConfig(title='How many dogs',
-                                    description='Question',
-                                    minimum=0,
-                                    maximum=10,
-                                    default=0,
-                                    enum=(0, 2, 4, 6))
+        item = schema.IntegerItem(title='How many dogs',
+                                  description='Question',
+                                  minimum=0,
+                                  maximum=10,
+                                  default=0,
+                                  enum=(0, 2, 4, 6))
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'integer',
@@ -886,8 +1143,8 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_integer_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.IntegerConfig(title='How many dogs', description='Question')
+        class TestConf(schema.Schema):
+            item = schema.IntegerItem(title='How many dogs', description='Question')
 
         try:
             jsonschema.validate({'item': 2}, TestConf.serialize())
@@ -898,10 +1155,10 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 3.1}, TestConf.serialize())
         self.assertIn('is not of type', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.IntegerConfig(title='How many dogs',
-                                        description='Question',
-                                        multiple_of=2)
+        class TestConf(schema.Schema):
+            item = schema.IntegerItem(title='How many dogs',
+                                      description='Question',
+                                      multiple_of=2)
 
         try:
             jsonschema.validate({'item': 4}, TestConf.serialize())
@@ -912,9 +1169,9 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 3}, TestConf.serialize())
         self.assertIn('is not a multiple of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.IntegerConfig(title='Foo', description='Foo Item',
-                                        minimum=1, maximum=10)
+        class TestConf(schema.Schema):
+            item = schema.IntegerItem(title='Foo', description='Foo Item',
+                                      minimum=1, maximum=10)
 
         try:
             jsonschema.validate({'item': 3}, TestConf.serialize())
@@ -925,21 +1182,21 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 11}, TestConf.serialize())
         self.assertIn('is greater than the maximum of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.IntegerConfig(title='Foo', description='Foo Item',
-                                        minimum=10, maximum=100)
+        class TestConf(schema.Schema):
+            item = schema.IntegerItem(title='Foo', description='Foo Item',
+                                      minimum=10, maximum=100)
 
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': 3}, TestConf.serialize())
         self.assertIn('is less than the minimum of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.IntegerConfig(title='How many dogs',
-                                        description='Question',
-                                        minimum=0,
-                                        exclusive_minimum=True,
-                                        maximum=10,
-                                        exclusive_maximum=True)
+        class TestConf(schema.Schema):
+            item = schema.IntegerItem(title='How many dogs',
+                                      description='Question',
+                                      minimum=0,
+                                      exclusive_minimum=True,
+                                      maximum=10,
+                                      exclusive_maximum=True)
 
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': 0}, TestConf.serialize())
@@ -949,30 +1206,30 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 10}, TestConf.serialize())
         self.assertIn('is greater than or equal to the maximum of', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.IntegerConfig(title='Foo',
-                                        description='Foo Item',
-                                        enum=(0, 2, 4, 6))
+        class TestConf(schema.Schema):
+            item = schema.IntegerItem(title='Foo',
+                                      description='Foo Item',
+                                      enum=(0, 2, 4, 6))
 
         try:
             jsonschema.validate({'item': 4}, TestConf.serialize())
         except jsonschema.exceptions.ValidationError as exc:
             self.fail('ValidationError raised: {0}'.format(exc))
 
-        class TestConf(config.Configuration):
-            item = config.IntegerConfig(title='Foo',
-                                        description='Foo Item',
-                                        enum=(0, 2, 4, 6))
+        class TestConf(schema.Schema):
+            item = schema.IntegerItem(title='Foo',
+                                      description='Foo Item',
+                                      enum=(0, 2, 4, 6))
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': 3}, TestConf.serialize())
         self.assertIn('is not one of', excinfo.exception.message)
 
     def test_array_config(self):
-        string_item = config.StringConfig(title='Dog Name',
-                                          description='The dog name')
-        item = config.ArrayConfig(title='Dog Names',
-                                  description='Name your dogs',
-                                  items=string_item)
+        string_item = schema.StringItem(title='Dog Name',
+                                        description='The dog name')
+        item = schema.ArrayItem(title='Dog Names',
+                                description='Name your dogs',
+                                items=string_item)
 
         self.assertDictEqual(
             item.serialize(), {
@@ -987,11 +1244,11 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        integer_item = config.IntegerConfig(title='Dog Age',
-                                            description='The dog age')
-        item = config.ArrayConfig(title='Dog Names',
-                                  description='Name your dogs',
-                                  items=(string_item, integer_item))
+        integer_item = schema.IntegerItem(title='Dog Age',
+                                          description='The dog age')
+        item = schema.ArrayItem(title='Dog Names',
+                                description='Name your dogs',
+                                items=(string_item, integer_item))
 
         self.assertDictEqual(
             item.serialize(), {
@@ -1013,14 +1270,14 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.ArrayConfig(title='Dog Names',
-                                  description='Name your dogs',
-                                  items=(config.StringConfig(),
-                                         config.IntegerConfig()),
-                                  min_items=1,
-                                  max_items=3,
-                                  additional_items=False,
-                                  unique_items=True)
+        item = schema.ArrayItem(title='Dog Names',
+                                description='Name your dogs',
+                                items=(schema.StringItem(),
+                                       schema.IntegerItem()),
+                                min_items=1,
+                                 max_items=3,
+                                additional_items=False,
+                                unique_items=True)
 
         self.assertDictEqual(
             item.serialize(), {
@@ -1042,12 +1299,12 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        class HowManyConfig(config.Configuration):
-            item = config.IntegerConfig(title='How many dogs', description='Question')
+        class HowManyConfig(schema.Schema):
+            item = schema.IntegerItem(title='How many dogs', description='Question')
 
-        item = config.ArrayConfig(title='Dog Names',
-                                  description='Name your dogs',
-                                  items=HowManyConfig())
+        item = schema.ArrayItem(title='Dog Names',
+                                description='Name your dogs',
+                                items=HowManyConfig())
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'array',
@@ -1057,12 +1314,12 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        class AgesConfig(config.Configuration):
-            item = config.IntegerConfig()
+        class AgesConfig(schema.Schema):
+            item = schema.IntegerItem()
 
-        item = config.ArrayConfig(title='Dog Names',
-                                  description='Name your dogs',
-                                  items=(HowManyConfig(), AgesConfig()))
+        item = schema.ArrayItem(title='Dog Names',
+                                description='Name your dogs',
+                                items=(HowManyConfig(), AgesConfig()))
         self.assertDictEqual(
             item.serialize(), {
                 'type': 'array',
@@ -1077,10 +1334,10 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_array_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(title='Dog Names',
-                                      description='Name your dogs',
-                                      items=config.StringConfig())
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(title='Dog Names',
+                                    description='Name your dogs',
+                                    items=schema.StringItem())
 
         try:
             jsonschema.validate({'item': ['Tobias', 'Óscar']}, TestConf.serialize(),
@@ -1093,12 +1350,12 @@ class ConfigTestCase(TestCase):
                                 format_checker=jsonschema.FormatChecker())
         self.assertIn('is not of type', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(title='Dog Names',
-                                      description='Name your dogs',
-                                      items=config.StringConfig(),
-                                      min_items=1,
-                                      max_items=2)
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(title='Dog Names',
+                                    description='Name your dogs',
+                                    items=schema.StringItem(),
+                                    min_items=1,
+                                    max_items=2)
 
         try:
             jsonschema.validate({'item': ['Tobias', 'Óscar']}, TestConf.serialize(),
@@ -1116,20 +1373,20 @@ class ConfigTestCase(TestCase):
                                 format_checker=jsonschema.FormatChecker())
         self.assertIn('is too short', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(title='Dog Names',
-                                      description='Name your dogs',
-                                      items=config.StringConfig(),
-                                      uniqueItems=True)
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(title='Dog Names',
+                                    description='Name your dogs',
+                                    items=schema.StringItem(),
+                                    uniqueItems=True)
 
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': ['Tobias', 'Tobias']}, TestConf.serialize(),
                                 format_checker=jsonschema.FormatChecker())
         self.assertIn('has non-unique elements', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(items=(config.StringConfig(),
-                                             config.IntegerConfig()))
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(items=(schema.StringItem(),
+                                           schema.IntegerItem()))
         try:
             jsonschema.validate({'item': ['Óscar', 4]}, TestConf.serialize(),
                                 format_checker=jsonschema.FormatChecker())
@@ -1141,11 +1398,11 @@ class ConfigTestCase(TestCase):
                                 format_checker=jsonschema.FormatChecker())
         self.assertIn('is not of type', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(
-                items=config.ArrayConfig(
-                    items=(config.StringConfig(),
-                           config.IntegerConfig())
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(
+                items=schema.ArrayItem(
+                    items=(schema.StringItem(),
+                           schema.IntegerItem())
                 )
             )
 
@@ -1160,8 +1417,8 @@ class ConfigTestCase(TestCase):
                                 format_checker=jsonschema.FormatChecker())
         self.assertIn('is not of type', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(items=config.StringConfig(enum=['Tobias', 'Óscar']))
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(items=schema.StringItem(enum=['Tobias', 'Óscar']))
         try:
             jsonschema.validate({'item': ['Óscar']}, TestConf.serialize(),
                                 format_checker=jsonschema.FormatChecker())
@@ -1179,11 +1436,11 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not one of', excinfo.exception.message)
 
     def test_dict_config(self):
-        item = config.DictConfig(
+        item = schema.DictItem(
             title='Poligon',
             description='Describe the Poligon',
             properties={
-                'sides': config.IntegerConfig()
+                'sides': schema.IntegerItem()
             }
         )
         self.assertDictEqual(
@@ -1197,11 +1454,11 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.DictConfig(
+        item = schema.DictItem(
             title='Poligon',
             description='Describe the Poligon',
             properties={
-                'sides': config.IntegerConfig()
+                'sides': schema.IntegerItem()
             },
             min_properties=1,
             max_properties=2
@@ -1219,11 +1476,11 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.DictConfig(
+        item = schema.DictItem(
             title='Poligon',
             description='Describe the Poligon',
             pattern_properties={
-                's*': config.IntegerConfig()
+                's.*': schema.IntegerItem()
             },
             min_properties=1,
             max_properties=2
@@ -1234,21 +1491,21 @@ class ConfigTestCase(TestCase):
                 'title': item.title,
                 'description': item.description,
                 'patternProperties': {
-                    's*': {'type': 'integer'}
+                    's.*': {'type': 'integer'}
                 },
                 'minProperties': 1,
                 'maxProperties': 2
             }
         )
 
-        item = config.DictConfig(
+        item = schema.DictItem(
             title='Poligon',
             description='Describe the Poligon',
             properties={
-                'color': config.StringConfig(enum=['red', 'green', 'blue'])
+                'color': schema.StringItem(enum=['red', 'green', 'blue'])
             },
             pattern_properties={
-                's*': config.IntegerConfig()
+                's*': schema.IntegerItem()
             },
             min_properties=1,
             max_properties=2
@@ -1272,14 +1529,14 @@ class ConfigTestCase(TestCase):
             }
         )
 
-        item = config.DictConfig(
+        item = schema.DictItem(
             title='Poligon',
             description='Describe the Poligon',
             properties={
-                'color': config.StringConfig(enum=['red', 'green', 'blue'])
+                'color': schema.StringItem(enum=['red', 'green', 'blue'])
             },
             pattern_properties={
-                's*': config.IntegerConfig()
+                's*': schema.IntegerItem()
             },
             additional_properties=True,
             min_properties=1,
@@ -1304,14 +1561,14 @@ class ConfigTestCase(TestCase):
                 'additionalProperties': True
             }
         )
-        item = config.DictConfig(
+        item = schema.DictItem(
             title='Poligon',
             description='Describe the Poligon',
             properties={
-                'sides': config.IntegerConfig()
+                'sides': schema.IntegerItem()
             },
-            additional_properties=config.OneOfConfig(items=[config.BooleanConfig(),
-                                                            config.StringConfig()])
+            additional_properties=schema.OneOfItem(items=[schema.BooleanItem(),
+                                                          schema.StringItem()])
         )
         self.assertDictEqual(
             item.serialize(), {
@@ -1332,15 +1589,14 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_dict_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.DictConfig(
+        class TestConf(schema.Schema):
+            item = schema.DictItem(
                 title='Poligon',
                 description='Describe the Poligon',
                 properties={
-                    'sides': config.IntegerConfig()
+                    'sides': schema.IntegerItem()
                 }
             )
-
         try:
             jsonschema.validate({'item': {'sides': 1}}, TestConf.serialize())
         except jsonschema.exceptions.ValidationError as exc:
@@ -1354,15 +1610,15 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 2}, TestConf.serialize())
         self.assertIn('is not of type', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.DictConfig(
+        class TestConf(schema.Schema):
+            item = schema.DictItem(
                 title='Poligon',
                 description='Describe the Poligon',
                 properties={
-                    'color': config.StringConfig(enum=['red', 'green', 'blue'])
+                    'color': schema.StringItem(enum=['red', 'green', 'blue'])
                 },
                 pattern_properties={
-                    'si.*': config.IntegerConfig()
+                    'si.*': schema.IntegerItem()
                 },
             )
 
@@ -1379,15 +1635,15 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': 2}, TestConf.serialize())
         self.assertIn('is not of type', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.DictConfig(
+        class TestConf(schema.Schema):
+            item = schema.DictItem(
                 title='Poligon',
                 description='Describe the Poligon',
                 properties={
-                    'color': config.StringConfig(enum=['red', 'green', 'blue'])
+                    'color': schema.StringItem(enum=['red', 'green', 'blue'])
                 },
                 pattern_properties={
-                    'si.*': config.IntegerConfig()
+                    'si.*': schema.IntegerItem()
                 },
                 additional_properties=False
             )
@@ -1396,17 +1652,16 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': {'color': 'green', 'sides': 4, 'surfaces': 4}}, TestConf.serialize())
         self.assertIn('Additional properties are not allowed', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.DictConfig(
+        class TestConf(schema.Schema):
+            item = schema.DictItem(
                 title='Poligon',
                 description='Describe the Poligon',
                 properties={
-                    'color': config.StringConfig(enum=['red', 'green', 'blue'])
+                    'color': schema.StringItem(enum=['red', 'green', 'blue'])
                 },
-                additional_properties=config.OneOfConfig(items=[
-                    config.BooleanConfig(),
-                    config.IntegerConfig()
-
+                additional_properties=schema.OneOfItem(items=[
+                    schema.BooleanItem(),
+                    schema.IntegerItem()
                 ])
             )
 
@@ -1421,17 +1676,16 @@ class ConfigTestCase(TestCase):
             jsonschema.validate({'item': {'sides': '4', 'color': 'blue'}}, TestConf.serialize())
         self.assertIn('is not valid under any of the given schemas', excinfo.exception.message)
 
-        class TestConf(config.Configuration):
-            item = config.DictConfig(
+        class TestConf(schema.Schema):
+            item = schema.DictItem(
                 title='Poligon',
                 description='Describe the Poligon',
                 properties={
-                    'color': config.StringConfig(enum=['red', 'green', 'blue'])
+                    'color': schema.StringItem(enum=['red', 'green', 'blue'])
                 },
-                additional_properties=config.OneOfConfig(items=[
-                    config.BooleanConfig(),
-                    config.IntegerConfig()
-
+                additional_properties=schema.OneOfItem(items=[
+                    schema.BooleanItem(),
+                    schema.IntegerItem()
                 ]),
                 min_properties=2,
                 max_properties=3
@@ -1459,9 +1713,9 @@ class ConfigTestCase(TestCase):
         self.assertIn('has too many properties', excinfo.exception.message)
 
     def test_oneof_config(self):
-        item = config.OneOfConfig(
-            items=(config.StringConfig(title='Yes', enum=['yes']),
-                   config.StringConfig(title='No', enum=['no']))
+        item = schema.OneOfItem(
+            items=(schema.StringItem(title='Yes', enum=['yes']),
+                   schema.StringItem(title='No', enum=['no']))
         )
         self.assertEqual(
             item.serialize(), {
@@ -1471,13 +1725,13 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_oneof_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(
                 title='Hungry',
                 description='Are you hungry?',
-                items=config.OneOfConfig(
-                    items=(config.StringConfig(title='Yes', enum=['yes']),
-                           config.StringConfig(title='No', enum=['no']))
+                items=schema.OneOfItem(
+                    items=(schema.StringItem(title='Yes', enum=['yes']),
+                           schema.StringItem(title='No', enum=['no']))
                 )
             )
 
@@ -1495,9 +1749,9 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not of type', excinfo.exception.message)
 
     def test_anyof_config(self):
-        item = config.AnyOfConfig(
-            items=(config.StringConfig(title='Yes', enum=['yes']),
-                   config.StringConfig(title='No', enum=['no']))
+        item = schema.AnyOfItem(
+            items=(schema.StringItem(title='Yes', enum=['yes']),
+                   schema.StringItem(title='No', enum=['no']))
         )
         self.assertEqual(
             item.serialize(), {
@@ -1507,14 +1761,14 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_anyof_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(
                 title='Hungry',
                 description='Are you hungry?',
-                items=config.AnyOfConfig(
-                    items=(config.StringConfig(title='Yes', enum=['yes']),
-                           config.StringConfig(title='No', enum=['no']),
-                           config.BooleanConfig())
+                items=schema.AnyOfItem(
+                    items=(schema.StringItem(title='Yes', enum=['yes']),
+                           schema.StringItem(title='No', enum=['no']),
+                           schema.BooleanItem())
                 )
             )
 
@@ -1547,9 +1801,9 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not of type', excinfo.exception.message)
 
     def test_allof_config(self):
-        item = config.AllOfConfig(
-            items=(config.StringConfig(min_length=2),
-                   config.StringConfig(max_length=3))
+        item = schema.AllOfItem(
+            items=(schema.StringItem(min_length=2),
+                   schema.StringItem(max_length=3))
         )
         self.assertEqual(
             item.serialize(), {
@@ -1559,13 +1813,13 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_allof_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(
                 title='Hungry',
                 description='Are you hungry?',
-                items=config.AllOfConfig(
-                    items=(config.StringConfig(min_length=2),
-                           config.StringConfig(max_length=3))
+                items=schema.AllOfItem(
+                    items=(schema.StringItem(min_length=2),
+                           schema.StringItem(max_length=3))
                 )
             )
 
@@ -1592,7 +1846,7 @@ class ConfigTestCase(TestCase):
         self.assertIn('is not of type', excinfo.exception.message)
 
     def test_not_config(self):
-        item = config.NotConfig(item=config.BooleanConfig())
+        item = schema.NotItem(item=schema.BooleanItem())
         self.assertEqual(
             item.serialize(), {
                 'not': item.item.serialize()
@@ -1601,11 +1855,11 @@ class ConfigTestCase(TestCase):
 
     @skipIf(HAS_JSONSCHEMA is False, 'The \'jsonschema\' library is missing')
     def test_not_config_validation(self):
-        class TestConf(config.Configuration):
-            item = config.ArrayConfig(
+        class TestConf(schema.Schema):
+            item = schema.ArrayItem(
                 title='Hungry',
                 description='Are you hungry?',
-                items=config.NotConfig(item=config.BooleanConfig())
+                items=schema.NotItem(item=schema.BooleanItem())
             )
 
         try:
@@ -1625,6 +1879,61 @@ class ConfigTestCase(TestCase):
         with self.assertRaises(jsonschema.exceptions.ValidationError) as excinfo:
             jsonschema.validate({'item': [False]}, TestConf.serialize())
         self.assertIn('is not allowed for', excinfo.exception.message)
+
+    def test_item_name_override_class_attrname(self):
+        class TestConf(schema.Schema):
+            item = schema.BooleanItem(name='hungry', title='Hungry', description='Are you hungry?')
+
+        expected = {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "type": "object",
+            "properties": {
+                "hungry": {
+                    "type": "boolean",
+                    "description": "Are you hungry?",
+                    "title": "Hungry"
+                }
+            },
+            "x-ordering": [
+                "hungry"
+            ],
+            "additionalProperties": False
+        }
+        self.assertDictEqual(TestConf.serialize(), expected)
+
+    def test_config_name_override_class_attrname(self):
+        class TestConf(schema.Schema):
+            item = schema.BooleanItem(title='Hungry', description='Are you hungry?')
+
+        class TestConf2(schema.Schema):
+            a_name = TestConf(name='another_name')
+
+        expected = {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "type": "object",
+            "properties": {
+                "another_name": {
+                    "id": "https://non-existing.saltstack.com/schemas/another_name.json#",
+                    "type": "object",
+                    "properties": {
+                        "item": {
+                            "type": "boolean",
+                            "description": "Are you hungry?",
+                            "title": "Hungry"
+                        }
+                    },
+                    "x-ordering": [
+                        "item"
+                    ],
+                    "additionalProperties": False
+                }
+            },
+            "x-ordering": [
+                "another_name"
+            ],
+            "additionalProperties": False
+        }
+        self.assertDictEqual(TestConf2.serialize(), expected)
 
 
 if __name__ == '__main__':

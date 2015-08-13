@@ -3,7 +3,7 @@
 VMware Cloud Module
 ===================
 
-.. versionadded:: 2015.8.0
+.. versionadded:: 2015.5.4
 
 The VMware cloud module allows you to manage VMware ESX, ESXi, and vCenter.
 
@@ -28,22 +28,24 @@ cloud configuration at
 
     my-vmware-config:
       driver: vmware
-      user: "DOMAIN\\user"
-      password: "verybadpass"
-      url: "vcenter01.domain.com"
+      user: 'DOMAIN\\user'
+      password: 'verybadpass'
+      url: '10.20.30.40'
 
-    vmware-vcenter02:
+    vcenter01:
       driver: vmware
-      user: "DOMAIN\\user"
-      password: "verybadpass"
-      url: "vcenter02.domain.com"
+      user: 'DOMAIN\\user'
+      password: 'verybadpass'
+      url: 'vcenter01.domain.com'
+      protocol: 'https'
+      port: 443
 
-    vmware-vcenter03:
+    vcenter02:
       driver: vmware
-      user: "DOMAIN\\user"
-      password: "verybadpass"
-      url: "vcenter03.domain.com"
-      protocol: "http"
+      user: 'DOMAIN\\user'
+      password: 'verybadpass'
+      url: 'vcenter02.domain.com'
+      protocol: 'http'
       port: 80
 
 .. note::
@@ -202,11 +204,13 @@ def _get_si():
                     port=port
                 )
                 ssl._create_default_https_context = default_context
-            except:
-                err_msg = exc.msg if isinstance(exc, vim.fault.InvalidLogin) and hasattr(exc, 'msg') else 'Could not connect to the specified vCenter server. Please check the specified protocol or url or port'
+            except Exception as exc:
+                err_msg = exc.msg if hasattr(exc, 'msg') else 'Could not connect to the specified vCenter server. Please check the debug log for more information'
+                log.debug(exc)
                 raise SaltCloudSystemExit(err_msg)
         else:
-            err_msg = exc.msg if isinstance(exc, vim.fault.InvalidLogin) and hasattr(exc, 'msg') else 'Could not connect to the specified vCenter server. Please check the specified protocol or url or port'
+            err_msg = exc.msg if hasattr(exc, 'msg') else 'Could not connect to the specified vCenter server. Please check the debug log for more information'
+            log.debug(exc)
             raise SaltCloudSystemExit(err_msg)
 
     atexit.register(Disconnect, si)
@@ -735,11 +739,10 @@ def _manage_devices(devices, vm):
     return ret
 
 
-def _wait_for_vmware_tools(vm_ref, max_wait_minute):
+def _wait_for_vmware_tools(vm_ref, max_wait):
     time_counter = 0
     starttime = time.time()
-    max_wait_second = int(max_wait_minute * 60)
-    while time_counter < max_wait_second:
+    while time_counter < max_wait:
         if time_counter % 5 == 0:
             log.info("[ {0} ] Waiting for VMware tools to be running [{1} s]".format(vm_ref.name, time_counter))
         if str(vm_ref.summary.guest.toolsRunningStatus) == "guestToolsRunning":
@@ -748,21 +751,20 @@ def _wait_for_vmware_tools(vm_ref, max_wait_minute):
 
         time.sleep(1.0 - ((time.time() - starttime) % 1.0))
         time_counter += 1
-    log.warning("[ {0} ] Timeout Reached. VMware tools still not running after waiting for {1} minutes".format(vm_ref.name, max_wait_minute))
+    log.warning("[ {0} ] Timeout Reached. VMware tools still not running after waiting for {1} seconds".format(vm_ref.name, max_wait))
     return False
 
 
-def _wait_for_ip(vm_ref, max_wait_minute):
-    max_wait_minute_vmware_tools = max_wait_minute - 5
-    max_wait_minute_ip = max_wait_minute - max_wait_minute_vmware_tools
-    vmware_tools_status = _wait_for_vmware_tools(vm_ref, max_wait_minute_vmware_tools)
+def _wait_for_ip(vm_ref, max_wait):
+    max_wait_vmware_tools = max_wait
+    max_wait_ip = max_wait
+    vmware_tools_status = _wait_for_vmware_tools(vm_ref, max_wait_vmware_tools)
     if not vmware_tools_status:
         return False
 
     time_counter = 0
     starttime = time.time()
-    max_wait_second = int(max_wait_minute_ip * 60)
-    while time_counter < max_wait_second:
+    while time_counter < max_wait_ip:
         if time_counter % 5 == 0:
             log.info("[ {0} ] Waiting to retrieve IPv4 information [{1} s]".format(vm_ref.name, time_counter))
 
@@ -779,7 +781,7 @@ def _wait_for_ip(vm_ref, max_wait_minute):
                         return current_ip.ipAddress
         time.sleep(1.0 - ((time.time() - starttime) % 1.0))
         time_counter += 1
-    log.warning("[ {0} ] Timeout Reached. Unable to retrieve IPv4 information after waiting for {1} minutes".format(vm_ref.name, max_wait_minute_ip))
+    log.warning("[ {0} ] Timeout Reached. Unable to retrieve IPv4 information after waiting for {1} seconds".format(vm_ref.name, max_wait_ip))
     return False
 
 
@@ -843,69 +845,157 @@ def _format_instance_info_select(vm, selection):
         vm_select_info['id'] = vm["name"]
 
     if 'image' in selection:
-        vm_select_info['image'] = "{0} (Detected)".format(vm["config.guestFullName"])
+        vm_select_info['image'] = "{0} (Detected)".format(vm["config.guestFullName"]) if "config.guestFullName" in vm else "N/A"
 
     if 'size' in selection:
-        vm_select_info['size'] = u"cpu: {0}\nram: {1}MB".format(vm["config.hardware.numCPU"], vm["config.hardware.memoryMB"])
+        cpu = vm["config.hardware.numCPU"] if "config.hardware.numCPU" in vm else "N/A"
+        ram = "{0} MB".format(vm["config.hardware.memoryMB"]) if "config.hardware.memoryMB" in vm else "N/A"
+        vm_select_info['size'] = u"cpu: {0}\nram: {1}".format(cpu, ram)
 
     if 'state' in selection:
-        vm_select_info['state'] = str(vm["summary.runtime.powerState"])
+        vm_select_info['state'] = str(vm["summary.runtime.powerState"]) if "summary.runtime.powerState" in vm else "N/A"
 
     if 'guest_id' in selection:
-        vm_select_info['guest_id'] = vm["config.guestId"]
+        vm_select_info['guest_id'] = vm["config.guestId"] if "config.guestId" in vm else "N/A"
 
     if 'hostname' in selection:
         vm_select_info['hostname'] = vm["object"].guest.hostName
 
     if 'path' in selection:
-        vm_select_info['path'] = vm["config.files.vmPathName"]
+        vm_select_info['path'] = vm["config.files.vmPathName"] if "config.files.vmPathName" in vm else "N/A"
 
     if 'tools_status' in selection:
         vm_select_info['tools_status'] = str(vm["guest.toolsStatus"]) if "guest.toolsStatus" in vm else "N/A"
 
-    if ('private_ips' or 'mac_address' or 'networks') in selection:
+    if 'private_ips' in selection or 'networks' in selection:
         network_full_info = {}
         ip_addresses = []
-        mac_addresses = []
 
-        for net in vm["guest.net"]:
-            network_full_info[net.network] = {
-                'connected': net.connected,
-                'ip_addresses': net.ipAddress,
-                'mac_address': net.macAddress
-            }
-            ip_addresses.extend(net.ipAddress)
-            mac_addresses.append(net.macAddress)
+        if "guest.net" in vm:
+            for net in vm["guest.net"]:
+                network_full_info[net.network] = {
+                    'connected': net.connected,
+                    'ip_addresses': net.ipAddress,
+                    'mac_address': net.macAddress
+                }
+                ip_addresses.extend(net.ipAddress)
 
         if 'private_ips' in selection:
             vm_select_info['private_ips'] = ip_addresses
 
-        if 'mac_address' in selection:
-            vm_select_info['mac_address'] = mac_addresses
-
         if 'networks' in selection:
             vm_select_info['networks'] = network_full_info
 
-    if 'devices' in selection:
+    if 'devices' in selection or 'mac_address' in selection or 'mac_addresses' in selection:
         device_full_info = {}
+        device_mac_addresses = []
+        if "config.hardware.device" in vm:
+            for device in vm["config.hardware.device"]:
+                device_full_info[device.deviceInfo.label] = {}
+                if 'devices' in selection:
+                    device_full_info[device.deviceInfo.label]['key'] = device.key,
+                    device_full_info[device.deviceInfo.label]['label'] = device.deviceInfo.label,
+                    device_full_info[device.deviceInfo.label]['summary'] = device.deviceInfo.summary,
+                    device_full_info[device.deviceInfo.label]['type'] = type(device).__name__.rsplit(".", 1)[1]
+
+                    if device.unitNumber:
+                        device_full_info[device.deviceInfo.label]['unitNumber'] = device.unitNumber
+
+                    if hasattr(device, 'connectable') and device.connectable:
+                        device_full_info[device.deviceInfo.label]['startConnected'] = device.connectable.startConnected
+                        device_full_info[device.deviceInfo.label]['allowGuestControl'] = device.connectable.allowGuestControl
+                        device_full_info[device.deviceInfo.label]['connected'] = device.connectable.connected
+                        device_full_info[device.deviceInfo.label]['status'] = device.connectable.status
+
+                    if hasattr(device, 'controllerKey') and device.controllerKey:
+                        device_full_info[device.deviceInfo.label]['controllerKey'] = device.controllerKey
+
+                    if hasattr(device, 'addressType'):
+                        device_full_info[device.deviceInfo.label]['addressType'] = device.addressType
+
+                    if hasattr(device, 'busNumber'):
+                        device_full_info[device.deviceInfo.label]['busNumber'] = device.busNumber
+
+                    if hasattr(device, 'device'):
+                        device_full_info[device.deviceInfo.label]['deviceKeys'] = device.device
+
+                    if hasattr(device, 'videoRamSizeInKB'):
+                        device_full_info[device.deviceInfo.label]['videoRamSizeInKB'] = device.videoRamSizeInKB
+
+                    if isinstance(device, vim.vm.device.VirtualDisk):
+                        device_full_info[device.deviceInfo.label]['capacityInKB'] = device.capacityInKB
+                        device_full_info[device.deviceInfo.label]['diskMode'] = device.backing.diskMode
+                        device_full_info[device.deviceInfo.label]['fileName'] = device.backing.fileName
+
+                if hasattr(device, 'macAddress'):
+                    device_full_info[device.deviceInfo.label]['macAddress'] = device.macAddress
+                    device_mac_addresses.append(device.macAddress)
+
+        if 'devices' in selection:
+            vm_select_info['devices'] = device_full_info
+
+        if 'mac_address' in selection or 'mac_addresses' in selection:
+            vm_select_info['mac_addresses'] = device_mac_addresses
+
+    if 'storage' in selection:
+        storage_full_info = {
+            'committed': int(vm["summary.storage.committed"]) if "summary.storage.committed" in vm else "N/A",
+            'uncommitted': int(vm["summary.storage.uncommitted"]) if "summary.storage.uncommitted" in vm else "N/A",
+            'unshared': int(vm["summary.storage.unshared"]) if "summary.storage.unshared" in vm else "N/A"
+        }
+        vm_select_info['storage'] = storage_full_info
+
+    if 'files' in selection:
+        file_full_info = {}
+        if "layoutEx.file" in file:
+            for file in vm["layoutEx.file"]:
+                file_full_info[file.key] = {
+                    'key': file.key,
+                    'name': file.name,
+                    'size': file.size,
+                    'type': file.type
+                }
+        vm_select_info['files'] = file_full_info
+
+    return vm_select_info
+
+
+def _format_instance_info(vm):
+    device_full_info = {}
+    device_mac_addresses = []
+    if "config.hardware.device" in vm:
         for device in vm["config.hardware.device"]:
             device_full_info[device.deviceInfo.label] = {
                 'key': device.key,
                 'label': device.deviceInfo.label,
                 'summary': device.deviceInfo.summary,
-                'type': type(device).__name__.rsplit(".", 1)[1],
-                'unitNumber': device.unitNumber
+                'type': type(device).__name__.rsplit(".", 1)[1]
             }
 
-            if hasattr(device.backing, 'network'):
+            if device.unitNumber:
+                device_full_info[device.deviceInfo.label]['unitNumber'] = device.unitNumber
+
+            if hasattr(device, 'connectable') and device.connectable:
+                device_full_info[device.deviceInfo.label]['startConnected'] = device.connectable.startConnected
+                device_full_info[device.deviceInfo.label]['allowGuestControl'] = device.connectable.allowGuestControl
+                device_full_info[device.deviceInfo.label]['connected'] = device.connectable.connected
+                device_full_info[device.deviceInfo.label]['status'] = device.connectable.status
+
+            if hasattr(device, 'controllerKey') and device.controllerKey:
+                device_full_info[device.deviceInfo.label]['controllerKey'] = device.controllerKey
+
+            if hasattr(device, 'addressType'):
                 device_full_info[device.deviceInfo.label]['addressType'] = device.addressType
+
+            if hasattr(device, 'macAddress'):
                 device_full_info[device.deviceInfo.label]['macAddress'] = device.macAddress
+                device_mac_addresses.append(device.macAddress)
 
             if hasattr(device, 'busNumber'):
                 device_full_info[device.deviceInfo.label]['busNumber'] = device.busNumber
 
             if hasattr(device, 'device'):
-                device_full_info[device.deviceInfo.label]['devices'] = device.device
+                device_full_info[device.deviceInfo.label]['deviceKeys'] = device.device
 
             if hasattr(device, 'videoRamSizeInKB'):
                 device_full_info[device.deviceInfo.label]['videoRamSizeInKB'] = device.videoRamSizeInKB
@@ -915,18 +1005,14 @@ def _format_instance_info_select(vm, selection):
                 device_full_info[device.deviceInfo.label]['diskMode'] = device.backing.diskMode
                 device_full_info[device.deviceInfo.label]['fileName'] = device.backing.fileName
 
-        vm_select_info['devices'] = device_full_info
+    storage_full_info = {
+        'committed': int(vm["summary.storage.committed"]) if "summary.storage.committed" in vm else "N/A",
+        'uncommitted': int(vm["summary.storage.uncommitted"]) if "summary.storage.uncommitted" in vm else "N/A",
+        'unshared': int(vm["summary.storage.unshared"]) if "summary.storage.unshared" in vm else "N/A"
+    }
 
-    if 'storage' in selection:
-        storage_full_info = {
-            'committed': vm["summary.storage.committed"],
-            'uncommitted': vm["summary.storage.uncommitted"],
-            'unshared': vm["summary.storage.unshared"]
-        }
-        vm_select_info['storage'] = storage_full_info
-
-    if 'files' in selection:
-        file_full_info = {}
+    file_full_info = {}
+    if "layoutEx.file" in vm:
         for file in vm["layoutEx.file"]:
             file_full_info[file.key] = {
                 'key': file.key,
@@ -934,82 +1020,35 @@ def _format_instance_info_select(vm, selection):
                 'size': file.size,
                 'type': file.type
             }
-        vm_select_info['files'] = file_full_info
-
-    return vm_select_info
-
-
-def _format_instance_info(vm):
-    device_full_info = {}
-    for device in vm["config.hardware.device"]:
-        device_full_info[device.deviceInfo.label] = {
-            'key': device.key,
-            'label': device.deviceInfo.label,
-            'summary': device.deviceInfo.summary,
-            'type': type(device).__name__.rsplit(".", 1)[1],
-            'unitNumber': device.unitNumber
-        }
-
-        if hasattr(device.backing, 'network'):
-            device_full_info[device.deviceInfo.label]['addressType'] = device.addressType
-            device_full_info[device.deviceInfo.label]['macAddress'] = device.macAddress
-
-        if hasattr(device, 'busNumber'):
-            device_full_info[device.deviceInfo.label]['busNumber'] = device.busNumber
-
-        if hasattr(device, 'device'):
-            device_full_info[device.deviceInfo.label]['devices'] = device.device
-
-        if hasattr(device, 'videoRamSizeInKB'):
-            device_full_info[device.deviceInfo.label]['videoRamSizeInKB'] = device.videoRamSizeInKB
-
-        if isinstance(device, vim.vm.device.VirtualDisk):
-            device_full_info[device.deviceInfo.label]['capacityInKB'] = device.capacityInKB
-            device_full_info[device.deviceInfo.label]['diskMode'] = device.backing.diskMode
-            device_full_info[device.deviceInfo.label]['fileName'] = device.backing.fileName
-
-    storage_full_info = {
-        'committed': int(vm["summary.storage.committed"]),
-        'uncommitted': int(vm["summary.storage.uncommitted"]),
-        'unshared': int(vm["summary.storage.unshared"])
-    }
-
-    file_full_info = {}
-    for file in vm["layoutEx.file"]:
-        file_full_info[file.key] = {
-            'key': file.key,
-            'name': file.name,
-            'size': file.size,
-            'type': file.type
-        }
 
     network_full_info = {}
     ip_addresses = []
-    mac_addresses = []
-    for net in vm["guest.net"]:
-        network_full_info[net.network] = {
-            'connected': net.connected,
-            'ip_addresses': net.ipAddress,
-            'mac_address': net.macAddress
-        }
-        ip_addresses.extend(net.ipAddress)
-        mac_addresses.append(net.macAddress)
+    if "guest.net" in vm:
+        for net in vm["guest.net"]:
+            network_full_info[net.network] = {
+                'connected': net.connected,
+                'ip_addresses': net.ipAddress,
+                'mac_address': net.macAddress
+            }
+            ip_addresses.extend(net.ipAddress)
 
+    cpu = vm["config.hardware.numCPU"] if "config.hardware.numCPU" in vm else "N/A"
+    ram = "{0} MB".format(vm["config.hardware.memoryMB"]) if "config.hardware.memoryMB" in vm else "N/A"
     vm_full_info = {
         'id': str(vm['name']),
-        'image': "{0} (Detected)".format(vm["config.guestFullName"]),
-        'size': u"cpu: {0}\nram: {1}MB".format(vm["config.hardware.numCPU"], vm["config.hardware.memoryMB"]),
-        'state': str(vm["summary.runtime.powerState"]),
+        'image': "{0} (Detected)".format(vm["config.guestFullName"]) if "config.guestFullName" in vm else "N/A",
+        'size': u"cpu: {0}\nram: {1}".format(cpu, ram),
+        'state': str(vm["summary.runtime.powerState"]) if "summary.runtime.powerState" in vm else "N/A",
         'private_ips': ip_addresses,
         'public_ips': [],
         'devices': device_full_info,
         'storage': storage_full_info,
         'files': file_full_info,
-        'guest_id': str(vm["config.guestId"]),
+        'guest_id': str(vm["config.guestId"]) if "config.guestId" in vm else "N/A",
         'hostname': str(vm["object"].guest.hostName),
-        'mac_address': mac_addresses,
+        'mac_addresses': device_mac_addresses,
         'networks': network_full_info,
-        'path': str(vm["config.files.vmPathName"]),
+        'path': str(vm["config.files.vmPathName"]) if "config.files.vmPathName" in vm else "N/A",
         'tools_status': str(vm["guest.toolsStatus"]) if "guest.toolsStatus" in vm else "N/A"
     }
 
@@ -1407,11 +1446,13 @@ def list_nodes(kwargs=None, call=None):
     vm_list = _get_mors_with_properties(vim.VirtualMachine, vm_properties)
 
     for vm in vm_list:
+        cpu = vm["config.hardware.numCPU"] if "config.hardware.numCPU" in vm else "N/A"
+        ram = "{0} MB".format(vm["config.hardware.memoryMB"]) if "config.hardware.memoryMB" in vm else "N/A"
         vm_info = {
             'id': vm["name"],
-            'image': "{0} (Detected)".format(vm["config.guestFullName"]),
-            'size': u"cpu: {0}\nram: {1}MB".format(vm["config.hardware.numCPU"], vm["config.hardware.memoryMB"]),
-            'state': str(vm["summary.runtime.powerState"]),
+            'image': "{0} (Detected)".format(vm["config.guestFullName"]) if "config.guestFullName" in vm else "N/A",
+            'size': u"cpu: {0}\nram: {1}".format(cpu, ram),
+            'state': str(vm["summary.runtime.powerState"]) if "summary.runtime.powerState" in vm else "N/A",
             'private_ips': [vm["guest.ipAddress"]] if "guest.ipAddress" in vm else [],
             'public_ips': []
         }
@@ -1518,10 +1559,10 @@ def list_nodes_select(call=None):
     if 'state' in selection:
         vm_properties.append("summary.runtime.powerState")
 
-    if ('private_ips' or 'mac_address' or 'networks') in selection:
+    if 'private_ips' in selection or 'networks' in selection:
         vm_properties.append("guest.net")
 
-    if 'devices' in selection:
+    if 'devices' in selection or 'mac_address' in selection or 'mac_addresses' in selection:
         vm_properties.append("config.hardware.device")
 
     if 'storage' in selection:
@@ -1599,7 +1640,7 @@ def show_instance(name, call=None):
             return _format_instance_info(vm)
 
 
-def avail_images():
+def avail_images(call=None):
     '''
     Return a list of all the templates present in this VMware environment with basic
     details
@@ -1610,6 +1651,11 @@ def avail_images():
 
         salt-cloud --list-images my-vmware-config
     '''
+    if call == 'action':
+        raise SaltCloudSystemExit(
+            'The avail_images function must be called with '
+            '-f or --function, or with the --list-images option.'
+        )
 
     templates = {}
     vm_properties = [
@@ -1632,6 +1678,74 @@ def avail_images():
             }
 
     return templates
+
+
+def avail_locations(call=None):
+    '''
+    Return a list of all the available locations/datacenters in this VMware environment
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud --list-locations my-vmware-config
+    '''
+    if call == 'action':
+        raise SaltCloudSystemExit(
+            'The avail_locations function must be called with '
+            '-f or --function, or with the --list-locations option.'
+        )
+
+    return list_datacenters(call='function')
+
+
+def avail_sizes(call=None):
+    '''
+    Return a list of all the available sizes in this VMware environment.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud --list-sizes my-vmware-config
+
+    .. note::
+
+        Since sizes are built into templates, this function will return
+        an empty dictionary.
+
+    '''
+    if call == 'action':
+        raise SaltCloudSystemExit(
+            'The avail_sizes function must be called with '
+            '-f or --function, or with the --list-sizes option.'
+        )
+
+    log.warning(
+        'Because sizes are built into templates with VMware, there are no sizes '
+        'to return.'
+    )
+
+    return {}
+
+
+def list_templates(kwargs=None, call=None):
+    '''
+    List all the templates present in this VMware environment
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud -f list_templates my-vmware-config
+    '''
+    if call != 'function':
+        raise SaltCloudSystemExit(
+            'The list_templates function must be called with '
+            '-f or --function.'
+        )
+
+    return {'Templates': avail_images(call='function')}
 
 
 def list_folders(kwargs=None, call=None):
@@ -2038,11 +2152,14 @@ def create(vm_):
 
         salt-cloud -p vmware-centos6.5 vmname
     '''
-    # Check for required profile parameters before sending any API calls.
-    if config.is_profile_configured(__opts__,
-                                    __active_provider_name__ or 'vmware',
-                                    vm_['profile']) is False:
-        return False
+    try:
+        # Check for required profile parameters before sending any API calls.
+        if config.is_profile_configured(__opts__,
+                                        __active_provider_name__ or 'vmware',
+                                        vm_['profile']) is False:
+            return False
+    except AttributeError:
+        pass
 
     # Since using "provider: <provider-engine>" is deprecated, alias provider
     # to use driver: "driver: <provider-engine>"
@@ -2105,6 +2222,9 @@ def create(vm_):
     )
     deploy = config.get_cloud_config_value(
         'deploy', vm_, __opts__, search_global=False, default=True
+    )
+    wait_for_ip_timeout = config.get_cloud_config_value(
+        'wait_for_ip_timeout', vm_, __opts__, default=20 * 60
     )
     domain = config.get_cloud_config_value(
         'domain', vm_, __opts__, search_global=False, default='local'
@@ -2305,7 +2425,7 @@ def create(vm_):
 
         # If it a template or if it does not need to be powered on then do not wait for the IP
         if not template and power:
-            ip = _wait_for_ip(new_vm_ref, 20)
+            ip = _wait_for_ip(new_vm_ref, wait_for_ip_timeout)
             if ip:
                 log.info("[ {0} ] IPv4 is: {1}".format(vm_name, ip))
                 # ssh or smb using ip and install salt only if deploy is True
@@ -3203,17 +3323,17 @@ def add_host(kwargs=None, call=None):
 
         .. code-block:: yaml
 
-            vmware-vcenter01:
-              provider: vmware
-              user: "DOMAIN\\user"
-              password: "verybadpass"
-              url: "vcenter01.domain.com"
+            vcenter01:
+              driver: vmware
+              user: 'DOMAIN\\user'
+              password: 'verybadpass'
+              url: 'vcenter01.domain.com'
 
               # Required when adding a host system
-              esxi_host_user: "root"
-              esxi_host_password: "myhostpassword"
+              esxi_host_user: 'root'
+              esxi_host_password: 'myhostpassword'
               # Optional fields that can be specified when adding a host system
-              esxi_host_ssl_thumbprint: "12:A3:45:B6:CD:7E:F8:90:A1:BC:23:45:D6:78:9E:FA:01:2B:34:CD"
+              esxi_host_ssl_thumbprint: '12:A3:45:B6:CD:7E:F8:90:A1:BC:23:45:D6:78:9E:FA:01:2B:34:CD'
 
         The SSL thumbprint of the host system can be optionally specified by setting
         ``esxi_host_ssl_thumbprint`` under your provider configuration. To get the SSL
