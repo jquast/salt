@@ -388,7 +388,7 @@ def lvcreate(lvname,
              'stripesize', 'minor', 'persistent', 'mirrors', 'noudevsync',
              'monitor', 'ignoremonitoring', 'permission', 'poolmetadatasize',
              'readahead', 'regionsize', 'type',
-             'virtualsize', 'zero')
+             'virtualsize', 'zero', 'yes')
     no_parameter = ('noudevsync', 'ignoremonitoring', )
 
     extra_arguments = []
